@@ -672,19 +672,26 @@ async function supprimerConge(id, isAdminTable){
 async function loadToutesDeclarations(){
   const { data, error } = await _supabase
     .from('conges_previsionnels')
-    .select('id, date_debut, date_fin, profiles(initiales)')
+    .select('id, date_debut, date_fin, medecin_uid')
     .order('date_debut');
+
+  if (error) { showMsg(error.message, 'error'); return; }
+
+  const { data: profils, error: eProf } = await _supabase
+    .schema('commun')
+    .from('profiles')
+    .select('id, initiales');
+  if (eProf) { showMsg(eProf.message, 'error'); return; }
+  const initialesParId = Object.fromEntries(profils.map(p => [p.id, p.initiales]));
 
   const tbody = document.querySelector('#tableToutesDeclarations tbody');
   tbody.innerHTML = '';
-
-  if (error) { showMsg(error.message, 'error'); return; }
 
   document.getElementById('emptyToutesDeclarations').classList.toggle('hidden', data.length > 0);
 
   data.forEach(row => {
     const tr = document.createElement('tr');
-    const initiales = row.profiles ? row.profiles.initiales : '?';
+    const initiales = initialesParId[row.medecin_uid] || '?';
     tr.innerHTML = `
       <td>${initiales}</td>
       <td>${fmt(row.date_debut)}</td>
@@ -769,24 +776,26 @@ async function recupererDonneesCampagnePourAlgo(){
   const { data: profils, error: e1 } = await _supabase
     .schema('commun')
     .from('profiles')
-    .select('initiales, quota_garde, quota_astreinte_j')
+    .select('id, initiales, quota_garde, quota_astreinte_j')
     .not('initiales', 'is', null);
   if (e1) throw e1;
 
+  const initialesParId = Object.fromEntries(profils.map(p => [p.id, p.initiales]));
+
   const { data: congesRaw, error: e2 } = await _supabase
     .from('conges_previsionnels')
-    .select('date_debut, date_fin, profiles(initiales)');
+    .select('date_debut, date_fin, medecin_uid');
   if (e2) throw e2;
   const conges = congesRaw.map(c => ({
-    initiales: c.profiles.initiales, date_debut: c.date_debut, date_fin: c.date_fin,
+    initiales: initialesParId[c.medecin_uid], date_debut: c.date_debut, date_fin: c.date_fin,
   }));
 
   const { data: memoireRaw, error: e3 } = await _supabase
     .from('memoire_fetes')
-    .select('type_fete, derniere_annee, profiles(initiales)');
+    .select('type_fete, derniere_annee, medecin_uid');
   if (e3) throw e3;
   const memoire = memoireRaw.map(m => ({
-    initiales: m.profiles.initiales, type_fete: m.type_fete, derniere_annee: m.derniere_annee,
+    initiales: initialesParId[m.medecin_uid], type_fete: m.type_fete, derniere_annee: m.derniere_annee,
   }));
 
   return { profils, conges, memoire };
