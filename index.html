@@ -827,10 +827,10 @@ document.getElementById('btnLancerRepartition').addEventListener('click', async 
     pyodide.globals.set('date_fin_js', campagne.date_fin_campagne);
     pyodide.globals.set('fenetre_js', fenetreWidth);
 
-    const resultatJson = await pyodide.runPythonAsync(`
+const resultatJson = await pyodide.runPythonAsync(`
 import json
 _df_calendar, _df_medecin, _df_fetes, _incidents, _anomalies, _resultats = generer_campagne_supabase(
-    profils_js.to_py(), conges_js.to_py(), memoire_js.to_py(),
+    profils_js, conges_js, memoire_js,
     date_debut_js, date_fin_js, fenetre_width=fenetre_js,
 )
 json.dumps({"incidents": _incidents, "anomalies": _anomalies, "resultats": _resultats})
