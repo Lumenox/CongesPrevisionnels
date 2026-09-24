@@ -749,12 +749,7 @@ async function chargerPyodide(statusEl){
   statusEl.textContent = "Chargement de l'environnement Python (quelques secondes la première fois)...";
   const instance = await loadPyodide();
   try {
-    await instance.loadPackage(['pandas', 'numpy', 'micropip']);
-    statusEl.textContent = 'Installation de workalendar...';
-    await instance.runPythonAsync(`
-import micropip
-await micropip.install('workalendar')
-    `);
+    await instance.loadPackage(['pandas', 'numpy']);
     statusEl.textContent = 'Récupération du script de répartition...';
     const reponse = await fetch(GITHUB_SCRIPT_URL);
     if (!reponse.ok) throw new Error("Impossible de récupérer le script sur GitHub (" + reponse.status + ")");
