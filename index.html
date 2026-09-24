@@ -841,8 +841,9 @@ json.dumps({"incidents": _incidents, "anomalies": _anomalies, "resultats": _resu
     afficherResultatsGeneration(resultat);
     statusEl.textContent = "Répartition générée — vérifie les résultats avant d'enregistrer.";
   } catch (err) {
-    showMsg('Erreur pendant la génération : ' + err.message, 'error');
-    statusEl.textContent = '';
+    const me = 'Erreur pendant la génération : ' + err.message;
+    showMsg(me, 'error');
+    statusEl.textContent = me;
   } finally {
     btn.disabled = false;
   }
