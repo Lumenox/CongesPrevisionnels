@@ -844,6 +844,8 @@ json.dumps({"incidents": _incidents, "anomalies": _anomalies, "resultats": _resu
     const me = 'Erreur pendant la génération : ' + err.message;
     showMsg(me, 'error');
     statusEl.textContent = me;
+    statusEl.style.color = 'var(--danger)';
+    statusEl.style.fontWeight = '600';
   } finally {
     btn.disabled = false;
   }
