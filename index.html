@@ -370,6 +370,20 @@
           <tbody></tbody>
         </table>
 
+        <h3 style="font-size:0.95rem; margin-top:16px;">Calendrier de la campagne</h3>
+        <div class="field" style="max-width:280px;">
+          <label for="filtreMedecin">Filtrer par médecin</label>
+          <select id="filtreMedecin">
+            <option value="">Tous les médecins</option>
+          </select>
+        </div>
+        <div style="max-height:420px; overflow-y:auto; border:1px solid var(--line); border-radius:8px;">
+          <table id="tableCalendrierGeneration">
+            <thead><tr><th>WE</th><th>Date</th><th>Jour</th><th>Garde</th><th>Astreinte</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
         <button class="primary hidden" id="btnEnregistrerResultat" style="margin-top:16px;">Enregistrer ce calendrier</button>
       </div>
     </section>
@@ -895,7 +909,31 @@ function afficherResultatsGeneration(resultat){
     `;
     tbody.appendChild(tr);
   });
+  function fmtCalendrier(d){
+  // date au format MM-JJ-AAAA (tel que renvoyé par repartition_gardes.py) -> JJ/MM/AAAA
+  if(!d) return '';
+  const [m, day, y] = d.split('-');
+  return `${day}/${m}/${y}`;
+}
 
+function renderCalendrierTable(calendrier, filtreMed){
+  const tbody = document.querySelector('#tableCalendrierGeneration tbody');
+  tbody.innerHTML = '';
+  const lignes = filtreMed
+    ? calendrier.filter(r => r.garde === filtreMed || r.astreinte === filtreMed)
+    : calendrier;
+  lignes.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.WE_N ?? ''}</td>
+      <td>${fmtCalendrier(r.date)}</td>
+      <td>${r.jour_semaine || ''}</td>
+      <td>${r.garde || ''}</td>
+      <td>${r.astreinte || ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
   document.getElementById('btnEnregistrerResultat').classList.remove('hidden');
 }
 
