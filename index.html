@@ -864,7 +864,31 @@ json.dumps({"incidents": _incidents, "anomalies": _anomalies, "resultats": _resu
     btn.disabled = false;
   }
 });
+function fmtCalendrier(d){
+  // date au format MM-JJ-AAAA (tel que renvoyé par repartition_gardes.py) -> JJ/MM/AAAA
+  if(!d) return '';
+  const [m, day, y] = d.split('-');
+  return `${day}/${m}/${y}`;
+}
 
+function renderCalendrierTable(calendrier, filtreMed){
+  const tbody = document.querySelector('#tableCalendrierGeneration tbody');
+  tbody.innerHTML = '';
+  const lignes = filtreMed
+    ? calendrier.filter(r => r.garde === filtreMed || r.astreinte === filtreMed)
+    : calendrier;
+  lignes.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.WE_N ?? ''}</td>
+      <td>${fmtCalendrier(r.date)}</td>
+      <td>${r.jour_semaine || ''}</td>
+      <td>${r.garde || ''}</td>
+      <td>${r.astreinte || ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
 function afficherResultatsGeneration(resultat){
   document.getElementById('resultatsGeneration').classList.remove('hidden');
 
@@ -909,31 +933,14 @@ function afficherResultatsGeneration(resultat){
     `;
     tbody.appendChild(tr);
   });
-  function fmtCalendrier(d){
-  // date au format MM-JJ-AAAA (tel que renvoyé par repartition_gardes.py) -> JJ/MM/AAAA
-  if(!d) return '';
-  const [m, day, y] = d.split('-');
-  return `${day}/${m}/${y}`;
-}
-
-function renderCalendrierTable(calendrier, filtreMed){
-  const tbody = document.querySelector('#tableCalendrierGeneration tbody');
-  tbody.innerHTML = '';
-  const lignes = filtreMed
-    ? calendrier.filter(r => r.garde === filtreMed || r.astreinte === filtreMed)
-    : calendrier;
-  lignes.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${r.WE_N ?? ''}</td>
-      <td>${fmtCalendrier(r.date)}</td>
-      <td>${r.jour_semaine || ''}</td>
-      <td>${r.garde || ''}</td>
-      <td>${r.astreinte || ''}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
+  const calendrier = resultat.resultats.calendrier || [];
+  const medecinsTries = [...medecins].sort((a, b) => a.localeCompare(b));
+  const selectMed = document.getElementById('filtreMedecin');
+  selectMed.innerHTML = '<option value="">Tous les médecins</option>'
+    + medecinsTries.map(m => `<option value="${m}">${m}</option>`).join('');
+  selectMed.value = '';
+  selectMed.onchange = () => renderCalendrierTable(calendrier, selectMed.value);
+  renderCalendrierTable(calendrier, '');
   document.getElementById('btnEnregistrerResultat').classList.remove('hidden');
 }
 
