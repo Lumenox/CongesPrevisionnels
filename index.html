@@ -949,9 +949,10 @@ document.getElementById('btnEnregistrerResultat').addEventListener('click', asyn
 
     const { gardes, memoire_fetes } = dernierResultatGeneration.resultats;
 
-    const lignesGardes = gardes
+     const lignesGardes = gardes
       .map(g => ({
         medecin_uid: idParInitiales[g.initiales],
+        initiales: g.initiales,
         date: convertirDateAmericaineEnIso(g.date),
         role: g.role,
       }))
@@ -965,6 +966,7 @@ document.getElementById('btnEnregistrerResultat').addEventListener('click', asyn
     const lignesMemoire = memoire_fetes
       .map(m => ({
         medecin_uid: idParInitiales[m.initiales],
+        initiales: m.initiales,
         type_fete: m.type_fete,
         derniere_annee: m.derniere_annee,
       }))
