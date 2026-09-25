@@ -206,7 +206,11 @@
     font-size:0.75rem;
     color:var(--ink-soft);
   }
-
+  .echange-row{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid var(--line); font-size:0.85rem; }
+.echange-row button{ padding:4px 8px; font-size:0.78rem; white-space:nowrap; }
+.echange-row button.possible{ background:var(--accent-soft); color:var(--accent-deep); }
+.echange-row button.impossible{ background:var(--line); color:var(--ink-soft); cursor:not-allowed; }
+  
   table{ width:100%; border-collapse:collapse; margin-top:8px; }
   th,td{
     text-align:left;
@@ -384,6 +388,32 @@
           </table>
         </div>
 
+                <h3 style="font-size:0.95rem; margin-top:16px;">Proposer des échanges</h3>
+        <p class="subtle" style="margin-bottom:10px;">
+          Seuls les créneaux simples (vendredi, veille de férié, samedi, astreinte de week-end
+          normal) sont proposés — les jours fériés et les astreintes triples restent figés.
+        </p>
+        <div class="row2">
+          <div class="field">
+            <label for="echangeMedA">Médecin A</label>
+            <select id="echangeMedA"><option value="">— choisir —</option></select>
+          </div>
+          <div class="field">
+            <label for="echangeMedB">Médecin B</label>
+            <select id="echangeMedB"><option value="">— choisir —</option></select>
+          </div>
+        </div>
+        <div class="row2" id="echangePanels" style="align-items:start;">
+          <div>
+            <h3 style="font-size:0.85rem;" id="echangeTitreA">Créneaux de A</h3>
+            <div id="echangeListeA" style="max-height:320px; overflow-y:auto;"></div>
+          </div>
+          <div>
+            <h3 style="font-size:0.85rem;" id="echangeTitreB">Créneaux de B</h3>
+            <div id="echangeListeB" style="max-height:320px; overflow-y:auto;"></div>
+          </div>
+        </div>
+        
         <button class="primary hidden" id="btnEnregistrerResultat" style="margin-top:16px;">Enregistrer ce calendrier</button>
       </div>
     </section>
@@ -843,7 +873,7 @@ document.getElementById('btnLancerRepartition').addEventListener('click', async 
 
 const resultatJson = await pyodide.runPythonAsync(`
 import json
-_df_calendar, _df_medecin, _df_fetes, _incidents, _anomalies, _resultats = generer_campagne_supabase(
+_df_calendar, _df_medecin, _df_fetes, _incidents, _anomalies, _resultats, _df_conges_medecin, _annee = generer_campagne_supabase(
     profils_js, conges_js, memoire_js,
     date_debut_js, date_fin_js, fenetre_width=fenetre_js,
 )
@@ -870,7 +900,89 @@ function fmtCalendrier(d){
   const [m, day, y] = d.split('-');
   return `${day}/${m}/${y}`;
 }
+async function rafraichirEchanges(){
+  const medA = document.getElementById('echangeMedA').value;
+  const medB = document.getElementById('echangeMedB').value;
+  const listeA = document.getElementById('echangeListeA');
+  const listeB = document.getElementById('echangeListeB');
+  document.getElementById('echangeTitreA').textContent = medA ? `Créneaux de ${medA}` : 'Créneaux de A';
+  document.getElementById('echangeTitreB').textContent = medB ? `Créneaux de ${medB}` : 'Créneaux de B';
 
+  if (!medA || !medB || medA === medB) {
+    listeA.innerHTML = '<p class="empty">Choisis deux médecins différents.</p>';
+    listeB.innerHTML = '';
+    return;
+  }
+
+  const fenetreWidth = parseInt(document.getElementById('fenetreWidthInput').value) || 4;
+  pyodideInstance.globals.set('med_a_js', medA);
+  pyodideInstance.globals.set('med_b_js', medB);
+  pyodideInstance.globals.set('fenetre_js2', fenetreWidth);
+
+  const echangesJson = await pyodideInstance.runPythonAsync(`
+import json
+json.dumps(preparer_echanges(_df_calendar, _df_medecin, _df_fetes, _df_conges_medecin, _annee,
+                              med_a_js, med_b_js, fenetre_width=fenetre_js2))
+  `);
+  const echanges = JSON.parse(echangesJson);
+  renderEchangeListe(listeA, echanges.a, medA, medB);
+  renderEchangeListe(listeB, echanges.b, medB, medA);
+}
+
+function renderEchangeListe(conteneur, creneaux, donateur, receveur){
+  conteneur.innerHTML = '';
+  if (creneaux.length === 0) {
+    conteneur.innerHTML = '<p class="empty">Aucun créneau échangeable.</p>';
+    return;
+  }
+  creneaux.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'echange-row';
+    const label = c.type_slot === 'garde' ? `Garde (${c.name_day})` : 'Astreinte';
+    const cls = c.don_possible ? 'possible' : 'impossible';
+    const texte = c.don_possible ? `→ ${receveur}` : 'Indisponible';
+    div.innerHTML = `
+      <span>${fmtCalendrier(c.date)} — ${label}</span>
+      <button class="${cls}" ${c.don_possible ? '' : 'disabled'}>${texte}</button>
+    `;
+    if (c.don_possible) {
+      div.querySelector('button').addEventListener('click', () => executerDon(c, donateur, receveur));
+    }
+    conteneur.appendChild(div);
+  });
+}
+
+async function executerDon(creneau, donateur, receveur){
+  clearMsg();
+  try {
+    pyodideInstance.globals.set('don_donateur_js', donateur);
+    pyodideInstance.globals.set('don_receveur_js', receveur);
+    if (creneau.type_slot === 'garde') {
+      pyodideInstance.globals.set('don_date_js', creneau.date);
+      await pyodideInstance.runPythonAsync(`
+_df_calendar, _df_medecin = faire_don_garde(_df_calendar, _df_medecin, don_date_js, don_donateur_js, don_receveur_js)
+      `);
+    } else {
+      pyodideInstance.globals.set('don_we_js', creneau.WE_N);
+      await pyodideInstance.runPythonAsync(`
+_df_calendar, _df_medecin = faire_don_astreinte(_df_calendar, _df_medecin, int(don_we_js), don_donateur_js, don_receveur_js)
+      `);
+    }
+
+    const resultatsJson = await pyodideInstance.runPythonAsync(`
+import json
+json.dumps(exporter_resultats_json(_df_calendar, _df_medecin, _df_fetes))
+    `);
+    dernierResultatGeneration.resultats = JSON.parse(resultatsJson);
+    afficherResultatsGeneration(dernierResultatGeneration);
+    document.getElementById('echangeMedA').value = donateur;
+    document.getElementById('echangeMedB').value = receveur;
+    await rafraichirEchanges();
+    showMsg(`Créneau du ${fmtCalendrier(creneau.date)} transféré de ${donateur} à ${receveur}.`, 'ok');
+  } catch (err) {
+    showMsg('Erreur pendant le transfert : ' + err.message, 'error');
+  }
+}
 function renderCalendrierTable(calendrier, filtreMed){
   const tbody = document.querySelector('#tableCalendrierGeneration tbody');
   tbody.innerHTML = '';
@@ -941,6 +1053,18 @@ function afficherResultatsGeneration(resultat){
   selectMed.value = '';
   selectMed.onchange = () => renderCalendrierTable(calendrier, selectMed.value);
   renderCalendrierTable(calendrier, '');
+  const optionsMed = '<option value="">— choisir —</option>'
+    + medecinsTries.map(m => `<option value="${m}">${m}</option>`).join('');
+  const selA = document.getElementById('echangeMedA');
+  const selB = document.getElementById('echangeMedB');
+  selA.innerHTML = optionsMed;
+  selB.innerHTML = optionsMed;
+  selA.value = '';
+  selB.value = '';
+  document.getElementById('echangeListeA').innerHTML = '';
+  document.getElementById('echangeListeB').innerHTML = '';
+  selA.onchange = rafraichirEchanges;
+  selB.onchange = rafraichirEchanges;
   document.getElementById('btnEnregistrerResultat').classList.remove('hidden');
 }
 
