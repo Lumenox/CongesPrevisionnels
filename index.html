@@ -413,6 +413,11 @@
             <div id="echangeListeB" style="max-height:320px; overflow-y:auto;"></div>
           </div>
         </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
+          <h3 style="font-size:0.95rem; margin:0;">Historique des échanges (cette session)</h3>
+          <button class="ghost" id="btnAnnulerEchange" disabled>↩ Retour (annuler le dernier)</button>
+        </div>
+        <ul id="historiqueEchangesListe" style="padding-left:20px; font-size:0.85rem; margin-top:8px;"></ul>
         
         <button class="primary hidden" id="btnEnregistrerResultat" style="margin-top:16px;">Enregistrer ce calendrier</button>
       </div>
@@ -787,6 +792,7 @@ const GITHUB_SCRIPT_URL = 'https://raw.githubusercontent.com/Lumenox/planning_ma
 
 let pyodideInstance = null;
 let dernierResultatGeneration = null;
+let historiqueEchanges = [];
 
 async function chargerPyodide(statusEl){
   if (pyodideInstance) return pyodideInstance;
@@ -928,7 +934,87 @@ json.dumps(preparer_echanges(_df_calendar, _df_medecin, _df_fetes, _df_conges_me
   renderEchangeListe(listeA, echanges.a, medA, medB);
   renderEchangeListe(listeB, echanges.b, medB, medA);
 }
+function rafraichirStatsEtCalendrier(resultat){
+  const stats = resultat.resultats.statistiques;
+  const medecins = Object.keys(stats.grand_total || {});
+  medecins.sort((a, b) => (stats.grand_total[b] || 0) - (stats.grand_total[a] || 0));
 
+  const tbody = document.querySelector('#tableStatsGeneration tbody');
+  tbody.innerHTML = '';
+  medecins.forEach(m => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${m}</td>
+      <td>${(stats.grand_total[m] || 0).toFixed(1)}</td>
+      <td>${(stats.total_astreinte_pondere[m] || 0).toFixed(1)}</td>
+      <td>${(stats.total_eq_ven_pondere[m] || 0).toFixed(1)}</td>
+      <td>${(stats.total_eq_sam_pondere[m] || 0).toFixed(1)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  renderCalendrierTable(resultat.resultats.calendrier || [], document.getElementById('filtreMedecin').value);
+}
+
+function renderHistorique(){
+  const ul = document.getElementById('historiqueEchangesListe');
+  const btnAnnuler = document.getElementById('btnAnnulerEchange');
+  ul.innerHTML = '';
+  if (historiqueEchanges.length === 0) {
+    ul.innerHTML = '<li class="empty">Aucun échange effectué pour l\'instant.</li>';
+    btnAnnuler.disabled = true;
+    return;
+  }
+  historiqueEchanges.forEach(h => {
+    const li = document.createElement('li');
+    const label = h.type_slot === 'garde' ? 'garde' : 'astreinte';
+    li.textContent = `${fmtCalendrier(h.date)} — ${label} transférée de ${h.donateur} à ${h.receveur}`;
+    ul.appendChild(li);
+  });
+  btnAnnuler.disabled = false;
+}
+
+document.getElementById('btnAnnulerEchange').addEventListener('click', async () => {
+  if (historiqueEchanges.length === 0) return;
+  const dernier = historiqueEchanges[historiqueEchanges.length - 1];
+  clearMsg();
+  try {
+    pyodideInstance.globals.set('don_donateur_js', dernier.receveur);
+    pyodideInstance.globals.set('don_receveur_js', dernier.donateur);
+    if (dernier.type_slot === 'garde') {
+      pyodideInstance.globals.set('don_date_js', dernier.date);
+      await pyodideInstance.runPythonAsync(`
+_df_calendar, _df_medecin = faire_don_garde(_df_calendar, _df_medecin, don_date_js, don_donateur_js, don_receveur_js)
+      `);
+    } else {
+      pyodideInstance.globals.set('don_we_js', dernier.WE_N);
+      await pyodideInstance.runPythonAsync(`
+_df_calendar, _df_medecin = faire_don_astreinte(_df_calendar, _df_medecin, int(don_we_js), don_donateur_js, don_receveur_js)
+      `);
+    }
+
+    const resultatsJson = await pyodideInstance.runPythonAsync(`
+import json
+json.dumps(exporter_resultats_json(_df_calendar, _df_medecin, _df_fetes))
+    `);
+    dernierResultatGeneration.resultats = JSON.parse(resultatsJson);
+    rafraichirStatsEtCalendrier(dernierResultatGeneration);
+
+    historiqueEchanges.pop();
+    renderHistorique();
+
+    const selA = document.getElementById('echangeMedA');
+    const selB = document.getElementById('echangeMedB');
+    if ((selA.value === dernier.donateur && selB.value === dernier.receveur) ||
+        (selA.value === dernier.receveur && selB.value === dernier.donateur)) {
+      await rafraichirEchanges();
+    }
+    showMsg(`Échange annulé : ${dernier.donateur} a repris le créneau du ${fmtCalendrier(dernier.date)}.`, 'ok');
+  } catch (err) {
+    showMsg("Erreur pendant l'annulation : " + err.message, 'error');
+  }
+});
+  
 function renderEchangeListe(conteneur, creneaux, donateur, receveur){
   conteneur.innerHTML = '';
   if (creneaux.length === 0) {
@@ -940,7 +1026,14 @@ function renderEchangeListe(conteneur, creneaux, donateur, receveur){
     div.className = 'echange-row';
     const label = c.type_slot === 'garde' ? `Garde (${c.name_day})` : 'Astreinte';
     const cls = c.don_possible ? 'possible' : 'impossible';
-    const texte = c.don_possible ? `→ ${receveur}` : 'Indisponible';
+    let texte;
+    if (c.don_possible) {
+      texte = `→ ${receveur}`;
+    } else if (c.alternatives.length > 0) {
+      texte = `Indisp. — voir : ${c.alternatives.join(', ')}`;
+    } else {
+      texte = 'Indisponible';
+    }
     div.innerHTML = `
       <span>${fmtCalendrier(c.date)} — ${label}</span>
       <button class="${cls}" ${c.don_possible ? '' : 'disabled'}>${texte}</button>
@@ -974,15 +1067,21 @@ import json
 json.dumps(exporter_resultats_json(_df_calendar, _df_medecin, _df_fetes))
     `);
     dernierResultatGeneration.resultats = JSON.parse(resultatsJson);
-    afficherResultatsGeneration(dernierResultatGeneration);
-    document.getElementById('echangeMedA').value = donateur;
-    document.getElementById('echangeMedB').value = receveur;
+    rafraichirStatsEtCalendrier(dernierResultatGeneration);
+
+    historiqueEchanges.push({
+      type_slot: creneau.type_slot, date: creneau.date, WE_N: creneau.WE_N,
+      donateur, receveur,
+    });
+    renderHistorique();
+
     await rafraichirEchanges();
     showMsg(`Créneau du ${fmtCalendrier(creneau.date)} transféré de ${donateur} à ${receveur}.`, 'ok');
   } catch (err) {
     showMsg('Erreur pendant le transfert : ' + err.message, 'error');
   }
 }
+  
 function renderCalendrierTable(calendrier, filtreMed){
   const tbody = document.querySelector('#tableCalendrierGeneration tbody');
   tbody.innerHTML = '';
@@ -1029,32 +1128,19 @@ function afficherResultatsGeneration(resultat){
   }
 
   const stats = resultat.resultats.statistiques;
-  const medecins = Object.keys(stats.grand_total || {});
-  medecins.sort((a, b) => (stats.grand_total[b] || 0) - (stats.grand_total[a] || 0));
+  const medecinsTries = Object.keys(stats.grand_total || {}).sort((a, b) => a.localeCompare(b));
 
-  const tbody = document.querySelector('#tableStatsGeneration tbody');
-  tbody.innerHTML = '';
-  medecins.forEach(m => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${m}</td>
-      <td>${(stats.grand_total[m] || 0).toFixed(1)}</td>
-      <td>${(stats.total_astreinte_pondere[m] || 0).toFixed(1)}</td>
-      <td>${(stats.total_eq_ven_pondere[m] || 0).toFixed(1)}</td>
-      <td>${(stats.total_eq_sam_pondere[m] || 0).toFixed(1)}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-  const calendrier = resultat.resultats.calendrier || [];
-  const medecinsTries = [...medecins].sort((a, b) => a.localeCompare(b));
-  const selectMed = document.getElementById('filtreMedecin');
-  selectMed.innerHTML = '<option value="">Tous les médecins</option>'
-    + medecinsTries.map(m => `<option value="${m}">${m}</option>`).join('');
-  selectMed.value = '';
-  selectMed.onchange = () => renderCalendrierTable(calendrier, selectMed.value);
-  renderCalendrierTable(calendrier, '');
+  rafraichirStatsEtCalendrier(resultat);
+
   const optionsMed = '<option value="">— choisir —</option>'
     + medecinsTries.map(m => `<option value="${m}">${m}</option>`).join('');
+
+  const selMedFiltre = document.getElementById('filtreMedecin');
+  selMedFiltre.innerHTML = '<option value="">Tous les médecins</option>'
+    + medecinsTries.map(m => `<option value="${m}">${m}</option>`).join('');
+  selMedFiltre.value = '';
+  selMedFiltre.onchange = () => renderCalendrierTable(resultat.resultats.calendrier || [], selMedFiltre.value);
+
   const selA = document.getElementById('echangeMedA');
   const selB = document.getElementById('echangeMedB');
   selA.innerHTML = optionsMed;
@@ -1065,6 +1151,10 @@ function afficherResultatsGeneration(resultat){
   document.getElementById('echangeListeB').innerHTML = '';
   selA.onchange = rafraichirEchanges;
   selB.onchange = rafraichirEchanges;
+
+  historiqueEchanges = [];
+  renderHistorique();
+
   document.getElementById('btnEnregistrerResultat').classList.remove('hidden');
 }
 
