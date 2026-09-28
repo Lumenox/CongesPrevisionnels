@@ -342,12 +342,17 @@
       </div>
       <button class="admin" id="btnSaveCampagne">Enregistrer les bornes</button>
 
-      <h3 style="margin-top:26px; font-size:0.95rem;">Toutes les déclarations</h3>
-      <table id="tableToutesDeclarations">
-        <thead><tr><th>Médecin</th><th>Début</th><th>Fin</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="empty hidden" id="emptyToutesDeclarations">Aucune déclaration pour l'instant.</p>
+      <details style="margin-top:26px;">
+        <summary style="cursor:pointer; font-family:'Fraunces',serif; font-weight:600; font-size:0.95rem;">
+          Toutes les déclarations
+          <span id="compteurDeclarations" style="font-weight:400; color:var(--ink-soft); font-size:0.82rem;"></span>
+        </summary>
+        <table id="tableToutesDeclarations">
+          <thead><tr><th>Médecin</th><th>Début</th><th>Fin</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="empty hidden" id="emptyToutesDeclarations">Aucune déclaration pour l'instant.</p>
+      </details>
 
       <div style="margin-top:20px; padding-top:16px; border-top:1px dashed var(--admin);">
         <button class="danger" id="btnResetCampagne">Réinitialiser la campagne (supprime toutes les déclarations)</button>
