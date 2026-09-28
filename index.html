@@ -1156,7 +1156,28 @@ function texteStatsMedecin(stats, colonnes, med){
     return cls ? `<span class="${cls}">${valeur.toFixed(1)}</span>` : valeur.toFixed(1);
   }).join(' / ');
 }  
-  
+function construireLignesStats(resultat){
+  const stats = resultat.resultats.statistiques;
+  const colonnes = calculerColonnesStats(stats); // réutilise la fonction du tour précédent
+
+  const lignes = Object.keys(stats.grand_total || {}).map(med => ({
+    initiales: med,
+    est_resume: false,
+    grand_total: stats.grand_total[med] ?? 0,
+    total_astreinte_pondere: stats.total_astreinte_pondere[med] ?? 0,
+    total_eq_ven_pondere: stats.total_eq_ven_pondere[med] ?? 0,
+    total_eq_sam_pondere: stats.total_eq_sam_pondere[med] ?? 0,
+  }));
+
+  const ligneResume = { initiales: null, est_resume: true };
+  colonnes.forEach(c => {
+    ligneResume[c.cle] = c.stats.moyenne;
+    ligneResume[`${c.cle}_ecart_type`] = c.stats.ecartType;
+  });
+  lignes.push(ligneResume);
+
+  return lignes;
+}
   
 function afficherResultatsGeneration(resultat){
   document.getElementById('resultatsGeneration').classList.remove('hidden');
@@ -1257,7 +1278,11 @@ document.getElementById('btnEnregistrerResultat').addEventListener('click', asyn
         .upsert(lignesMemoire, { onConflict: 'medecin_uid,type_fete' });
       if (e2) throw e2;
     }
-
+    
+    const lignesStats = construireLignesStats(dernierResultatGeneration);
+    const { error: e3 } = await _supabase.from('gardes_stats').insert(lignesStats);
+    if (e3) throw e3;
+    
     showMsg('Calendrier enregistré.', 'ok');
     document.getElementById('btnEnregistrerResultat').classList.add('hidden');
   } catch (err) {
