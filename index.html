@@ -363,7 +363,40 @@
     <section class="card admin-section hidden" id="generationCard">
       <h2>Répartition des gardes</h2>
       <p class="subtle">Calcule la répartition à partir des congés déclarés ci-dessus. Rien n'est enregistré tant que tu ne cliques pas sur "Enregistrer".</p>
-
+      
+      <details style="margin-bottom:16px;">
+        <summary style="cursor:pointer; font-family:'Fraunces',serif; font-weight:600; font-size:0.95rem;">
+          Dates prédéfinies
+          <span id="compteurPredefinis" style="font-weight:400; color:var(--ink-soft); font-size:0.82rem;">(0)</span>
+        </summary>
+        <p class="subtle" style="margin-top:8px;">
+          Créneaux imposés avant le calcul : placés d'office, comptés dans les statistiques du médecin,
+          et la répartition s'organise autour (fenêtre de récupération incluse). Limité aux week-ends simples.
+        </p>
+        <div class="row2">
+          <div class="field">
+            <label for="predefMedecin">Médecin</label>
+            <select id="predefMedecin"><option value="">— médecin —</option></select>
+          </div>
+          <div class="field">
+            <label for="predefType">Type</label>
+            <select id="predefType">
+              <option value="garde">Garde (vendredi ou samedi)</option>
+              <option value="astreinte">Astreinte (week-end)</option>
+            </select>
+          </div>
+        </div>
+        <div class="field" style="max-width:220px;">
+          <label for="predefDate">Date</label>
+          <input type="date" id="predefDate">
+        </div>
+        <button class="admin" id="btnAjouterPredef">Ajouter</button>
+        <table id="tablePredefinis">
+          <thead><tr><th>Médecin</th><th>Type</th><th>Date</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </details>
+      
       <div class="field" style="max-width:220px;">
         <label for="fenetreWidthInput">Largeur de la fenêtre d'immunité</label>
         <input type="number" id="fenetreWidthInput" value="4" min="1" max="10">
@@ -566,6 +599,7 @@ async function onSignedIn(user){
   await loadCampagne();
   await loadMesConges();
   if (isSuperAdmin) await loadToutesDeclarations();
+  if (isSuperAdmin) await chargerMedecinsPredefinis();
 }
 
 function onSignedOut(){
@@ -805,6 +839,7 @@ const GITHUB_SCRIPT_URL = 'https://raw.githubusercontent.com/Lumenox/planning_ma
 let pyodideInstance = null;
 let dernierResultatGeneration = null;
 let historiqueEchanges = [];
+let datesPredefinies = [];  // { medecin, type: 'garde'|'astreinte', date: 'YYYY-MM-DD' }
 
 async function chargerPyodide(statusEl){
   if (pyodideInstance) return pyodideInstance;
@@ -862,6 +897,75 @@ function convertirDateAmericaineEnIso(mmddyyyy){
   const [mm, dd, yyyy] = mmddyyyy.split('-');
   return `${yyyy}-${mm}-${dd}`;
 }
+function convertirDateIsoEnAmericaine(iso){
+  const [y, m, d] = iso.split('-');
+  return `${m}-${d}-${y}`;
+}
+
+async function chargerMedecinsPredefinis(){
+  const { data, error } = await _supabase
+    .schema('commun')
+    .from('profiles')
+    .select('initiales')
+    .not('initiales', 'is', null)
+    .neq('initiales', '')
+    .order('initiales');
+  if (error) { showMsg(error.message, 'error'); return; }
+  document.getElementById('predefMedecin').innerHTML =
+    '<option value="">— médecin —</option>'
+    + data.map(p => `<option value="${p.initiales}">${p.initiales}</option>`).join('');
+}
+
+function renderPredefinis(){
+  const tbody = document.querySelector('#tablePredefinis tbody');
+  tbody.innerHTML = '';
+  datesPredefinies.forEach((p, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${p.medecin}</td>
+      <td>${p.type === 'garde' ? 'Garde' : 'Astreinte'}</td>
+      <td>${fmt(p.date)}</td>
+      <td class="actions"><button class="danger">Retirer</button></td>
+    `;
+    tr.querySelector('button').addEventListener('click', () => {
+      datesPredefinies.splice(i, 1);
+      renderPredefinis();
+    });
+    tbody.appendChild(tr);
+  });
+  document.getElementById('compteurPredefinis').textContent = `(${datesPredefinies.length})`;
+}
+
+document.getElementById('btnAjouterPredef').addEventListener('click', () => {
+  clearMsg();
+  const medecin = document.getElementById('predefMedecin').value;
+  const type = document.getElementById('predefType').value;
+  const date = document.getElementById('predefDate').value;
+
+  if (!medecin || !date) { showMsg('Choisis un médecin et une date.', 'error'); return; }
+  if (campagne && (date < campagne.date_debut_campagne || date > campagne.date_fin_campagne)) {
+    showMsg('La date doit être comprise dans la période de campagne.', 'error');
+    return;
+  }
+  const jour = new Date(date + 'T00:00:00').getDay(); // 0 = dimanche ... 6 = samedi
+  if (type === 'garde' && ![5, 6].includes(jour)) {
+    showMsg('Une garde prédéfinie doit tomber un vendredi ou un samedi.', 'error');
+    return;
+  }
+  if (type === 'astreinte' && ![6, 0].includes(jour)) {
+    showMsg("Une astreinte prédéfinie se positionne sur le samedi ou le dimanche du week-end.", 'error');
+    return;
+  }
+  if (datesPredefinies.some(p => p.date === date && p.type === type)) {
+    showMsg('Ce créneau est déjà prédéfini.', 'error');
+    return;
+  }
+
+  datesPredefinies.push({ medecin, type, date });
+  datesPredefinies.sort((a, b) => a.date.localeCompare(b.date));
+  document.getElementById('predefDate').value = '';
+  renderPredefinis();
+});
 
 document.getElementById('btnLancerRepartition').addEventListener('click', async () => {
   clearMsg();
@@ -888,12 +992,15 @@ document.getElementById('btnLancerRepartition').addEventListener('click', async 
     pyodide.globals.set('date_debut_js', campagne.date_debut_campagne);
     pyodide.globals.set('date_fin_js', campagne.date_fin_campagne);
     pyodide.globals.set('fenetre_js', fenetreWidth);
+    pyodide.globals.set('ajouts_js', pyodide.toPy(
+      datesPredefinies.map(p => [convertirDateIsoEnAmericaine(p.date), p.medecin, p.type])
+    ));
 
 const resultatJson = await pyodide.runPythonAsync(`
 import json
 _df_calendar, _df_medecin, _df_fetes, _incidents, _anomalies, _resultats, _df_conges_medecin, _annee = generer_campagne_supabase(
     profils_js, conges_js, memoire_js,
-    date_debut_js, date_fin_js, fenetre_width=fenetre_js,
+    date_debut_js, date_fin_js, fenetre_width=fenetre_js,  list_ajout=ajouts_js,
 )
 json.dumps({"incidents": _incidents, "anomalies": _anomalies, "resultats": _resultats})
     `);
