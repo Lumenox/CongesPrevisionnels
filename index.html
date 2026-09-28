@@ -1139,8 +1139,8 @@ function calculerColonnesStats(stats){
 
 function classeStat(valeur, colStats){
   if (valeur === 0 || colStats.moyenne === null) return '';
-  if (valeur >= colStats.moyenne + colStats.ecartType) return 'stat-high';
-  if (valeur <= colStats.moyenne - colStats.ecartType) return 'stat-low';
+  if (valeur >= colStats.moyenne + 0.5* colStats.ecartType) return 'stat-high'; //test
+  if (valeur <= colStats.moyenne - 0.5* colStats.ecartType) return 'stat-low';
   return '';
 }
 
