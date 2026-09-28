@@ -165,6 +165,11 @@
   .field{ margin-bottom:14px; }
   .row2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 
+
+  #tableStatsGeneration tr.stats-summary td{ font-style:italic; color:var(--ink-soft); font-size:0.78rem; border-bottom:2px solid var(--line); }
+.stat-low{ color:var(--accent-deep); font-weight:700; }
+.stat-high{ color:var(--danger); font-weight:700; }
+  
   #msg{
     font-size:0.85rem;
     padding:10px 12px;
@@ -406,10 +411,12 @@
         <div class="row2" id="echangePanels" style="align-items:start;">
           <div>
             <h3 style="font-size:0.85rem;" id="echangeTitreA">Créneaux de A</h3>
+            <p id="echangeStatsA" style="margin:0 0 8px; font-size:0.8rem; color:var(--ink-soft);"></p>
             <div id="echangeListeA" style="max-height:320px; overflow-y:auto;"></div>
           </div>
           <div>
             <h3 style="font-size:0.85rem;" id="echangeTitreB">Créneaux de B</h3>
+            <p id="echangeStatsB" style="margin:0 0 8px; font-size:0.8rem; color:var(--ink-soft);"></p>
             <div id="echangeListeB" style="max-height:320px; overflow-y:auto;"></div>
           </div>
         </div>
@@ -914,6 +921,11 @@ async function rafraichirEchanges(){
   document.getElementById('echangeTitreA').textContent = medA ? `Créneaux de ${medA}` : 'Créneaux de A';
   document.getElementById('echangeTitreB').textContent = medB ? `Créneaux de ${medB}` : 'Créneaux de B';
 
+  const stats = dernierResultatGeneration.resultats.statistiques;
+  const colonnes = calculerColonnesStats(stats);
+  document.getElementById('echangeStatsA').innerHTML = medA ? texteStatsMedecin(stats, colonnes, medA) : '';
+  document.getElementById('echangeStatsB').innerHTML = medB ? texteStatsMedecin(stats, colonnes, medB) : '';
+  
   if (!medA || !medB || medA === medB) {
     listeA.innerHTML = '<p class="empty">Choisis deux médecins différents.</p>';
     listeB.innerHTML = '';
@@ -939,16 +951,25 @@ function rafraichirStatsEtCalendrier(resultat){
   const medecins = Object.keys(stats.grand_total || {});
   medecins.sort((a, b) => (stats.grand_total[b] || 0) - (stats.grand_total[a] || 0));
 
+  const colonnes = calculerColonnesStats(stats);
+
   const tbody = document.querySelector('#tableStatsGeneration tbody');
   tbody.innerHTML = '';
+
+  const trResume = document.createElement('tr');
+  trResume.className = 'stats-summary';
+  trResume.innerHTML = `
+    <td>moy (ET), hors 0</td>
+    ${colonnes.map(c => `<td>${fmtMoyEcart(c.stats)}</td>`).join('')}
+  `;
+  tbody.appendChild(trResume);
+
   medecins.forEach(m => {
+    const valeurs = colonnes.map(c => stats[c.cle][m] || 0);
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${m}</td>
-      <td>${(stats.grand_total[m] || 0).toFixed(1)}</td>
-      <td>${(stats.total_astreinte_pondere[m] || 0).toFixed(1)}</td>
-      <td>${(stats.total_eq_ven_pondere[m] || 0).toFixed(1)}</td>
-      <td>${(stats.total_eq_sam_pondere[m] || 0).toFixed(1)}</td>
+      ${colonnes.map((c, i) => `<td class="${classeStat(valeurs[i], c.stats)}">${valeurs[i].toFixed(1)}</td>`).join('')}
     `;
     tbody.appendChild(tr);
   });
@@ -1100,6 +1121,43 @@ function renderCalendrierTable(calendrier, filtreMed){
     tbody.appendChild(tr);
   });
 }
+
+const COLONNES_STATS = ['grand_total', 'total_astreinte_pondere', 'total_eq_ven_pondere', 'total_eq_sam_pondere'];
+
+function statsMoyEcart(valeurs){
+  // exclut les 0 du calcul (médecins volontairement à 0 gardes/astreinte pour ce type de créneau)
+  const filtres = valeurs.filter(v => v !== 0);
+  if (filtres.length < 2) return { moyenne: null, ecartType: null };
+  const moyenne = filtres.reduce((s, v) => s + v, 0) / filtres.length;
+  const variance = filtres.reduce((s, v) => s + (v - moyenne) ** 2, 0) / (filtres.length - 1);
+  return { moyenne, ecartType: Math.sqrt(variance) };
+}
+
+function calculerColonnesStats(stats){
+  return COLONNES_STATS.map(cle => ({ cle, stats: statsMoyEcart(Object.values(stats[cle] || {})) }));
+}
+
+function classeStat(valeur, colStats){
+  if (valeur === 0 || colStats.moyenne === null) return '';
+  if (valeur >= colStats.moyenne + colStats.ecartType) return 'stat-high';
+  if (valeur <= colStats.moyenne - colStats.ecartType) return 'stat-low';
+  return '';
+}
+
+function fmtMoyEcart(colStats){
+  if (colStats.moyenne === null) return '—';
+  return `${colStats.moyenne.toFixed(1)} (${colStats.ecartType.toFixed(1)})`;
+}
+
+function texteStatsMedecin(stats, colonnes, med){
+  return colonnes.map(c => {
+    const valeur = (stats[c.cle] && stats[c.cle][med]) || 0;
+    const cls = classeStat(valeur, c.stats);
+    return cls ? `<span class="${cls}">${valeur.toFixed(1)}</span>` : valeur.toFixed(1);
+  }).join(' / ');
+}  
+  
+  
 function afficherResultatsGeneration(resultat){
   document.getElementById('resultatsGeneration').classList.remove('hidden');
 
