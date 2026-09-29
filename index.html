@@ -407,6 +407,9 @@
       <div id="resultatsGeneration" class="hidden" style="margin-top:20px;">
         <h3 style="font-size:0.95rem;">Incidents (créneaux non pourvus)</h3>
         <ul id="incidentsListe" style="padding-left:20px; font-size:0.88rem;"></ul>
+        <button class="admin hidden" id="btnReduireFenetreIncidents" style="margin-top:8px;">
+          🔧 Relancer en réduisant la fenêtre sur les créneaux en échec
+        </button>
 
         <h3 style="font-size:0.95rem; margin-top:16px;">Anomalies</h3>
         <ul id="anomaliesListe" style="padding-left:20px; font-size:0.88rem;"></ul>
@@ -854,6 +857,7 @@ const GITHUB_SCRIPT_URL = 'https://raw.githubusercontent.com/Lumenox/planning_ma
 
 let pyodideInstance = null;
 let dernierResultatGeneration = null;
+let exceptionsFenetre = new Map(); // WE_N -> largeur de fenêtre à utiliser pour ce WE
 let historiqueEchanges = [];
 let datesPredefinies = [];  // { medecin, type: 'garde'|'astreinte', date: 'YYYY-MM-DD' }
 
@@ -982,12 +986,13 @@ document.getElementById('btnAjouterPredef').addEventListener('click', () => {
   document.getElementById('predefDate').value = '';
   renderPredefinis();
 });
-
-document.getElementById('btnLancerRepartition').addEventListener('click', async () => {
+  
+async function lancerGeneration(exceptionsFenetreObj, boutonsADesactiver, messageStatutDebut){
   clearMsg();
-  const btn = document.getElementById('btnLancerRepartition');
   const statusEl = document.getElementById('generationStatus');
-  btn.disabled = true;
+  statusEl.style.color = '';
+  statusEl.style.fontWeight = '';
+  boutonsADesactiver.forEach(b => b.disabled = true);
   document.getElementById('resultatsGeneration').classList.add('hidden');
   document.getElementById('btnEnregistrerResultat').classList.add('hidden');
 
@@ -1001,22 +1006,21 @@ document.getElementById('btnLancerRepartition').addEventListener('click', async 
 
     const fenetreWidth = parseInt(document.getElementById('fenetreWidthInput').value) || 4;
 
-    statusEl.textContent = 'Calcul de la répartition en cours...';
+    statusEl.textContent = messageStatutDebut;
     pyodide.globals.set('profils_js', pyodide.toPy(profils));
     pyodide.globals.set('conges_js', pyodide.toPy(conges));
     pyodide.globals.set('memoire_js', pyodide.toPy(memoire));
     pyodide.globals.set('date_debut_js', campagne.date_debut_campagne);
     pyodide.globals.set('date_fin_js', campagne.date_fin_campagne);
     pyodide.globals.set('fenetre_js', fenetreWidth);
-    pyodide.globals.set('ajouts_js', pyodide.toPy(
-      datesPredefinies.map(p => [convertirDateIsoEnAmericaine(p.date), p.medecin, p.type])
-    ));
+    pyodide.globals.set('exceptions_js', pyodide.toPy(exceptionsFenetreObj));
 
-const resultatJson = await pyodide.runPythonAsync(`
+    const resultatJson = await pyodide.runPythonAsync(`
 import json
 _df_calendar, _df_medecin, _df_fetes, _incidents, _anomalies, _resultats, _df_conges_medecin, _annee = generer_campagne_supabase(
     profils_js, conges_js, memoire_js,
-    date_debut_js, date_fin_js, fenetre_width=fenetre_js,  list_ajout=ajouts_js,
+    date_debut_js, date_fin_js, fenetre_width=fenetre_js,
+    exception_fenetre_width=exceptions_js,
 )
 json.dumps({"incidents": _incidents, "anomalies": _anomalies, "resultats": _resultats})
     `);
@@ -1032,9 +1036,32 @@ json.dumps({"incidents": _incidents, "anomalies": _anomalies, "resultats": _resu
     statusEl.style.color = 'var(--danger)';
     statusEl.style.fontWeight = '600';
   } finally {
-    btn.disabled = false;
+    boutonsADesactiver.forEach(b => b.disabled = false);
   }
+}
+
+document.getElementById('btnLancerRepartition').addEventListener('click', () => {
+  exceptionsFenetre = new Map(); // nouveau lancement "propre" : on oublie les réductions précédentes
+  lancerGeneration({}, [document.getElementById('btnLancerRepartition')], 'Calcul de la répartition en cours...');
 });
+
+document.getElementById('btnReduireFenetreIncidents').addEventListener('click', () => {
+  if (!dernierResultatGeneration) return;
+  const fenetreBase = parseInt(document.getElementById('fenetreWidthInput').value) || 4;
+
+  dernierResultatGeneration.incidents.forEach(([, we]) => {
+    const largeurActuelle = exceptionsFenetre.has(we) ? exceptionsFenetre.get(we) : fenetreBase;
+    exceptionsFenetre.set(we, Math.max(1, largeurActuelle - 1));
+  });
+
+  const exceptionsObj = Object.fromEntries(exceptionsFenetre);
+  lancerGeneration(
+    exceptionsObj,
+    [document.getElementById('btnLancerRepartition'), document.getElementById('btnReduireFenetreIncidents')],
+    'Recalcul avec une fenêtre réduite sur les créneaux en échec...'
+  );
+});
+  
 function fmtCalendrier(d){
   // date au format MM-JJ-AAAA (tel que renvoyé par repartition_gardes.py) -> JJ/MM/AAAA
   if(!d) return '';
@@ -1311,15 +1338,20 @@ function afficherResultatsGeneration(resultat){
   document.getElementById('resultatsGeneration').classList.remove('hidden');
 
   const incidentsEl = document.getElementById('incidentsListe');
+  const btnReduire = document.getElementById('btnReduireFenetreIncidents');
   incidentsEl.innerHTML = '';
   if (resultat.incidents.length === 0) {
     incidentsEl.innerHTML = '<li class="empty">Aucun — tous les créneaux ont été attribués.</li>';
+    btnReduire.classList.add('hidden');
   } else {
     resultat.incidents.forEach(([type, we]) => {
       const li = document.createElement('li');
-      li.textContent = `${type} — semaine ${we} (aucun médecin disponible)`;
+      const largeurUtilisee = exceptionsFenetre.get(we);
+      li.textContent = `${type} — semaine ${we} (aucun médecin disponible)`
+        + (largeurUtilisee ? ` — déjà tenté à fenêtre ${largeurUtilisee}` : '');
       incidentsEl.appendChild(li);
     });
+    btnReduire.classList.remove('hidden');
   }
 
   const anomaliesEl = document.getElementById('anomaliesListe');
