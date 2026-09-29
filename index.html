@@ -465,6 +465,22 @@
         <ul id="historiqueEchangesListe" style="padding-left:20px; font-size:0.85rem; margin-top:8px;"></ul>
         
         <button class="primary hidden" id="btnEnregistrerResultat" style="margin-top:16px;">Enregistrer ce calendrier</button>
+        <button class="admin hidden" id="btnExporterNeuroplanning" style="margin-top:16px; margin-left:8px;">Exporter vers Neuroplanning</button>
+
+        <div id="panelPushNeuroplanning" class="card hidden" style="margin-top:20px; border:1px dashed var(--admin); background:var(--admin-soft);">
+          <h3 style="font-size:0.95rem; color:var(--admin);">Export vers Neuroplanning</h3>
+          <p id="pushNeuroplanningResume" class="subtle"></p>
+          <p style="font-weight:600;">⚠️ Pensez à vérifier sur Neuroplanning si tout s'est bien passé.</p>
+          <ul id="pushNeuroplanningErreurs" style="padding-left:20px; font-size:0.85rem; color:var(--danger);"></ul>
+          <details id="detailsEcrasements" class="hidden" style="margin-top:10px;">
+            <summary style="cursor:pointer; font-size:0.85rem;">Valeurs écrasées (<span id="compteurEcrasements">0</span>)</summary>
+            <ul id="listeEcrasements" style="padding-left:20px; font-size:0.82rem;"></ul>
+          </details>
+          <div style="margin-top:14px; display:flex; gap:10px;">
+            <button class="danger" id="btnAnnulerPush">↩ Annulation immédiate du push</button>
+            <button class="ghost" id="btnFermerPanelPush">Fermer</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1397,11 +1413,191 @@ document.getElementById('btnEnregistrerResultat').addEventListener('click', asyn
     
     showMsg('Calendrier enregistré.', 'ok');
     document.getElementById('btnEnregistrerResultat').classList.add('hidden');
+    document.getElementById('btnExporterNeuroplanning').classList.remove('hidden');
   } catch (err) {
     showMsg('Erreur en enregistrant : ' + err.message, 'error');
   }
 });
+// ---------- Export vers Neuroplanning ----------
 
+let dernierPushNeuroplanning = null; // { avant: [{id, colonne, ancienne_valeur}] } — pour l'annulation immédiate
+
+async function executerAvecConcurrence(taches, concurrence){
+  const resultats = new Array(taches.length);
+  let index = 0;
+  async function worker(){
+    while (index < taches.length) {
+      const i = index++;
+      resultats[i] = await taches[i]();
+    }
+  }
+  await Promise.all(Array.from({ length: concurrence }, worker));
+  return resultats;
+}
+
+function construireOperationsNeuroplanning(resultat){
+  // Une opération = une cellule (date, heure, colonne) à écrire.
+  // "garde" -> Garde sur les deux lignes du jour (09:00 et 13:30).
+  // "astreinte" -> Astr sur la ligne 09:00 du jour (chaque jour d'astreinte, samedi/dimanche/férié
+  // accolé, arrive déjà comme une entrée séparée dans resultat.resultats.gardes).
+  const operations = [];
+  (resultat.resultats.gardes || []).forEach(g => {
+    const dateIso = convertirDateAmericaineEnIso(g.date);
+    if (g.role === 'garde') {
+      operations.push({ date_iso: dateIso, heure: '09:00:00', colonne: 'Garde', valeur: g.initiales });
+      operations.push({ date_iso: dateIso, heure: '13:30:00', colonne: 'Garde', valeur: g.initiales });
+    } else if (g.role === 'astreinte') {
+      operations.push({ date_iso: dateIso, heure: '09:00:00', colonne: 'Astr', valeur: g.initiales });
+    }
+  });
+  return operations;
+}
+
+function afficherPanelPushNeuroplanning(nbOperations, ecrasements, erreurs){
+  const panel = document.getElementById('panelPushNeuroplanning');
+  panel.classList.remove('hidden');
+
+  document.getElementById('pushNeuroplanningResume').textContent =
+    `${nbOperations - erreurs.length} / ${nbOperations} cellules mises à jour dans Neuroplanning.`;
+
+  const ulErreurs = document.getElementById('pushNeuroplanningErreurs');
+  ulErreurs.innerHTML = '';
+  erreurs.forEach(e => {
+    const li = document.createElement('li');
+    li.textContent = e;
+    ulErreurs.appendChild(li);
+  });
+
+  const details = document.getElementById('detailsEcrasements');
+  const ulEcr = document.getElementById('listeEcrasements');
+  ulEcr.innerHTML = '';
+  document.getElementById('compteurEcrasements').textContent = ecrasements.length;
+  if (ecrasements.length > 0) {
+    details.classList.remove('hidden');
+    ecrasements.forEach(e => {
+      const li = document.createElement('li');
+      li.textContent = `${fmt(e.date_iso)} ${e.heure} (${e.colonne}) : ${e.ancienne_valeur || '(vide)'} → ${e.valeur}`;
+      ulEcr.appendChild(li);
+    });
+  } else {
+    details.classList.add('hidden');
+  }
+}
+
+document.getElementById('btnExporterNeuroplanning').addEventListener('click', async () => {
+  if (!dernierResultatGeneration) return;
+  if (!confirm("Exporter ce calendrier vers Neuroplanning (colonnes Garde et Astr) ? Les valeurs déjà présentes seront écrasées.")) return;
+
+  clearMsg();
+  const btn = document.getElementById('btnExporterNeuroplanning');
+  btn.disabled = true;
+
+  try {
+    const operations = construireOperationsNeuroplanning(dernierResultatGeneration);
+    if (operations.length === 0) {
+      showMsg("Rien à exporter : aucune garde/astreinte dans ce calendrier.", 'error');
+      return;
+    }
+
+    const datesUniques = [...new Set(operations.map(o => o.date_iso))];
+    const dateMin = datesUniques.reduce((a, b) => (a < b ? a : b));
+    const dateMax = datesUniques.reduce((a, b) => (a > b ? a : b));
+
+    const { data: lignesExistantes, error: eSel } = await _supabase
+      .schema('neuroplanning')
+      .from('planning')
+      .select('id, date, heure, Garde, Astr')
+      .gte('date', dateMin)
+      .lte('date', dateMax);
+    if (eSel) throw eSel;
+
+    if (lignesExistantes.length >= 950) {
+      showMsg(
+        "Attention : proche de la limite de 1000 lignes par requête Supabase — certaines lignes de la période pourraient manquer à cette vérification. Vérifie le résultat avec attention.",
+        'error'
+      );
+    }
+
+    const cle = (date, heure) => `${date}_${heure}`;
+    const lookup = new Map(lignesExistantes.map(l => [cle(l.date, l.heure), l]));
+
+    const manquantes = [];
+    operations.forEach(o => {
+      if (!lookup.has(cle(o.date_iso, o.heure))) manquantes.push(`${fmt(o.date_iso)} ${o.heure}`);
+    });
+
+    if (manquantes.length > 0) {
+      showMsg(
+        `Export annulé (aucune écriture faite) : ${manquantes.length} ligne(s) manquante(s) dans Neuroplanning, ` +
+        `par ex. ${[...new Set(manquantes)].slice(0, 5).join(', ')}${manquantes.length > 5 ? '…' : ''}. ` +
+        `Crée d'abord ces dates dans Neuroplanning, puis relance l'export.`,
+        'error'
+      );
+      return;
+    }
+
+    const avant = operations.map(o => {
+      const ligne = lookup.get(cle(o.date_iso, o.heure));
+      return { id: ligne.id, colonne: o.colonne, ancienne_valeur: ligne[o.colonne] };
+    });
+    const ecrasements = operations
+      .map((o, i) => ({ ...o, ancienne_valeur: avant[i].ancienne_valeur }))
+      .filter(o => o.ancienne_valeur && o.ancienne_valeur !== o.valeur);
+
+    const resultatsMaj = await executerAvecConcurrence(
+      operations.map((o, i) => async () => {
+        const { error } = await _supabase
+          .schema('neuroplanning')
+          .from('planning')
+          .update({ [o.colonne]: o.valeur })
+          .eq('id', avant[i].id);
+        return error ? `${fmt(o.date_iso)} ${o.heure} (${o.colonne}) : ${error.message}` : null;
+      }),
+      8
+    );
+    const erreurs = resultatsMaj.filter(Boolean);
+
+    dernierPushNeuroplanning = { avant };
+    afficherPanelPushNeuroplanning(operations.length, ecrasements, erreurs);
+  } catch (err) {
+    showMsg("Erreur pendant l'export vers Neuroplanning : " + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('btnAnnulerPush').addEventListener('click', async () => {
+  if (!dernierPushNeuroplanning) return;
+  if (!confirm("Annuler immédiatement ce push et restaurer les valeurs précédentes dans Neuroplanning ?")) return;
+
+  clearMsg();
+  const resultatsAnnulation = await executerAvecConcurrence(
+    dernierPushNeuroplanning.avant.map(a => async () => {
+      const { error } = await _supabase
+        .schema('neuroplanning')
+        .from('planning')
+        .update({ [a.colonne]: a.ancienne_valeur })
+        .eq('id', a.id);
+      return error ? `id ${a.id} (${a.colonne}) : ${error.message}` : null;
+    }),
+    8
+  );
+  const erreursAnnulation = resultatsAnnulation.filter(Boolean);
+
+  dernierPushNeuroplanning = null;
+  document.getElementById('panelPushNeuroplanning').classList.add('hidden');
+
+  if (erreursAnnulation.length > 0) {
+    showMsg(`Annulation partielle : ${erreursAnnulation.length} erreur(s) — ${erreursAnnulation.slice(0, 3).join(' | ')}`, 'error');
+  } else {
+    showMsg('Push annulé : les valeurs précédentes ont été restaurées dans Neuroplanning.', 'ok');
+  }
+});
+
+document.getElementById('btnFermerPanelPush').addEventListener('click', () => {
+  dernierPushNeuroplanning = null; // ferme la fenêtre d'annulation "immédiate"
+  document.getElementById('panelPushNeuroplanning').classList.add('hidden');
+});
 checkSession();
 </script>
 </body>
