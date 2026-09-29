@@ -1601,8 +1601,14 @@ function afficherPanelPushNeuroplanning(nbOperations, ecrasements, erreurs){
 }
 
 document.getElementById('btnExporterNeuroplanning').addEventListener('click', async () => {
-  if (!dernierResultatGeneration) return;
-  if (!confirm("Exporter ce calendrier vers Neuroplanning (colonnes Garde et Astr) ? Les valeurs déjà présentes seront écrasées.")) return;
+  if (!dernierResultatGeneration) {
+    showMsg("Aucun résultat de génération en mémoire — relance une répartition avant d'exporter.", 'error');
+    return;
+  }
+  if (!confirm("Exporter ce calendrier vers Neuroplanning (colonnes Garde et Astr) ? Les valeurs déjà présentes seront écrasées.")) {
+    showMsg("Export annulé (fenêtre de confirmation refusée ou non affichée).", 'error');
+    return;
+  }
 
   clearMsg();
   const btn = document.getElementById('btnExporterNeuroplanning');
