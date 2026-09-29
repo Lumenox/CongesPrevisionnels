@@ -1689,9 +1689,15 @@ document.getElementById('btnExporterNeuroplanning').addEventListener('click', as
 });
 
 document.getElementById('btnAnnulerPush').addEventListener('click', async () => {
-  if (!dernierPushNeuroplanning) return;
-  if (!confirm("Annuler immédiatement ce push et restaurer les valeurs précédentes dans Neuroplanning ?")) return;
-
+  if (!dernierPushNeuroplanning) {
+    showMsg("Rien à annuler.", 'error');
+    return;
+  }
+  if (!confirm("Annuler immédiatement ce push et restaurer les valeurs précédentes dans Neuroplanning ?")) {
+    showMsg("Annulation refusée (fenêtre de confirmation).", 'error');
+    return;
+  }
+  
   clearMsg();
   const resultatsAnnulation = await executerAvecConcurrence(
     dernierPushNeuroplanning.avant.map(a => async () => {
