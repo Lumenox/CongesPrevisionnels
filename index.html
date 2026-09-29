@@ -1606,7 +1606,11 @@ document.getElementById('btnExporterNeuroplanning').addEventListener('click', as
     return;
   }
   if (!confirm("Exporter ce calendrier vers Neuroplanning (colonnes Garde et Astr) ? Les valeurs déjà présentes seront écrasées.")) {
-    showMsg("Export annulé (fenêtre de confirmation refusée ou non affichée).", 'error');
+    const me = 'Export annulé (fenêtre de confirmation refusée ou non affichée). ';
+    showMsg(me, 'error');
+    statusEl.textContent = me;
+    statusEl.style.color = 'var(--danger)';
+    statusEl.style.fontWeight = '600';
     return;
   }
 
@@ -1617,7 +1621,11 @@ document.getElementById('btnExporterNeuroplanning').addEventListener('click', as
   try {
     const operations = construireOperationsNeuroplanning(dernierResultatGeneration);
     if (operations.length === 0) {
-      showMsg("Rien à exporter : aucune garde/astreinte dans ce calendrier.", 'error');
+      const me = 'Rien à exporter : aucune garde/astreinte dans ce calendrier.';
+      showMsg(me, 'error');
+      statusEl.textContent = me;
+      statusEl.style.color = 'var(--danger)';
+      statusEl.style.fontWeight = '600';
       return;
     }
 
@@ -1634,8 +1642,12 @@ document.getElementById('btnExporterNeuroplanning').addEventListener('click', as
     if (eSel) throw eSel;
 
     if (lignesExistantes.length >= 950) {
-      showMsg(
-        "Attention : proche de la limite de 1000 lignes par requête Supabase — certaines lignes de la période pourraient manquer à cette vérification. Vérifie le résultat avec attention.",
+      const me = 'Attention : proche de la limite de 1000 lignes par requête Supabase — certaines lignes de la période pourraient manquer à cette vérification. Vérifie le résultat avec attention.';
+      showMsg(me, 'error');
+      statusEl.textContent = me;
+      statusEl.style.color = 'var(--danger)';
+      statusEl.style.fontWeight = '600';
+      showMsg(        me,
         'error'
       );
     }
