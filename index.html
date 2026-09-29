@@ -410,6 +410,10 @@
         <button class="admin hidden" id="btnReduireFenetreIncidents" style="margin-top:8px;">
           🔧 Relancer en réduisant la fenêtre sur les créneaux en échec
         </button>
+        <div id="changementsRelance" class="hidden" style="margin-top:12px;">
+          <h3 style="font-size:0.95rem;">Changements par rapport à l'essai précédent</h3>
+          <ul id="changementsRelanceListe" style="padding-left:20px; font-size:0.85rem;"></ul>
+        </div>
 
         <h3 style="font-size:0.95rem; margin-top:16px;">Anomalies</h3>
         <ul id="anomaliesListe" style="padding-left:20px; font-size:0.88rem;"></ul>
@@ -1045,9 +1049,11 @@ document.getElementById('btnLancerRepartition').addEventListener('click', () => 
   lancerGeneration({}, [document.getElementById('btnLancerRepartition')], 'Calcul de la répartition en cours...');
 });
 
-document.getElementById('btnReduireFenetreIncidents').addEventListener('click', () => {
+document.getElementById('btnReduireFenetreIncidents').addEventListener('click', async () => {
   if (!dernierResultatGeneration) return;
   const fenetreBase = parseInt(document.getElementById('fenetreWidthInput').value) || 4;
+
+  const ancienCalendrier = dernierResultatGeneration.resultats.calendrier || [];
 
   dernierResultatGeneration.incidents.forEach(([, we]) => {
     const largeurActuelle = exceptionsFenetre.has(we) ? exceptionsFenetre.get(we) : fenetreBase;
@@ -1055,11 +1061,13 @@ document.getElementById('btnReduireFenetreIncidents').addEventListener('click', 
   });
 
   const exceptionsObj = Object.fromEntries(exceptionsFenetre);
-  lancerGeneration(
+  await lancerGeneration(
     exceptionsObj,
     [document.getElementById('btnLancerRepartition'), document.getElementById('btnReduireFenetreIncidents')],
     'Recalcul avec une fenêtre réduite sur les créneaux en échec...'
   );
+
+  afficherChangements(ancienCalendrier, dernierResultatGeneration.resultats.calendrier || []);
 });
   
 function fmtCalendrier(d){
@@ -1068,6 +1076,50 @@ function fmtCalendrier(d){
   const [m, day, y] = d.split('-');
   return `${day}/${m}/${y}`;
 }
+
+function afficherChangements(ancienCalendrier, nouveauCalendrier){
+  const ancienParDate = new Map(ancienCalendrier.map(r => [r.date, r]));
+  const nouveauParDate = new Map(nouveauCalendrier.map(r => [r.date, r]));
+  const toutesDates = new Set([...ancienParDate.keys(), ...nouveauParDate.keys()]);
+
+  const changements = [];
+  toutesDates.forEach(date => {
+    const avant = ancienParDate.get(date) || {};
+    const apres = nouveauParDate.get(date) || {};
+    ['garde', 'astreinte'].forEach(champ => {
+      const valAvant = avant[champ] || null;
+      const valApres = apres[champ] || null;
+      if (valAvant !== valApres) {
+        changements.push({
+          WE_N: apres.WE_N ?? avant.WE_N,
+          date,
+          champ,
+          avant: valAvant || 'aucun médecin',
+          apres: valApres || 'aucun médecin',
+        });
+      }
+    });
+  });
+
+  const conteneur = document.getElementById('changementsRelance');
+  const liste = document.getElementById('changementsRelanceListe');
+  liste.innerHTML = '';
+  conteneur.classList.remove('hidden');
+
+  if (changements.length === 0) {
+    liste.innerHTML = '<li class="empty">Aucun changement par rapport à l\'essai précédent.</li>';
+    return;
+  }
+
+  changements.sort((a, b) => convertirDateAmericaineEnIso(a.date).localeCompare(convertirDateAmericaineEnIso(b.date)));
+  changements.forEach(c => {
+    const li = document.createElement('li');
+    const label = c.champ === 'garde' ? 'Garde' : 'Astreinte';
+    li.textContent = `WE ${c.WE_N ?? '?'} — ${label} du ${fmtCalendrier(c.date)} : ${c.avant} → ${c.apres}`;
+    liste.appendChild(li);
+  });
+}
+
 async function rafraichirEchanges(){
   const medA = document.getElementById('echangeMedA').value;
   const medB = document.getElementById('echangeMedB').value;
@@ -1353,7 +1405,10 @@ function afficherResultatsGeneration(resultat){
     });
     btnReduire.classList.remove('hidden');
   }
-
+  
+  document.getElementById('changementsRelance').classList.add('hidden');
+  document.getElementById('changementsRelanceListe').innerHTML = '';
+  
   const anomaliesEl = document.getElementById('anomaliesListe');
   anomaliesEl.innerHTML = '';
   if (resultat.anomalies.length === 0) {
