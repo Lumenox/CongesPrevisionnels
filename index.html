@@ -1060,6 +1060,8 @@ async function lancerGeneration(exceptionsFenetreObj, boutonsADesactiver, messag
     pyodide.globals.set('immunite_js', pyodide.toPy(initialesImmunite));
     pyodide.globals.set('nb_we_immunite_js', nbWeImmunite);
     pyodide.globals.set('exceptions_js', pyodide.toPy(exceptionsFenetreObj));
+    const listAjout = datesPredefinies.map(p => [convertirDateIsoEnAmericaine(p.date), p.medecin, p.type]);
+    pyodide.globals.set('list_ajout_js', pyodide.toPy(listAjout));
 
     const resultatJson = await pyodide.runPythonAsync(`
 import json
@@ -1067,6 +1069,7 @@ _df_calendar, _df_medecin, _df_fetes, _incidents, _anomalies, _resultats, _df_co
     profils_js, conges_js, memoire_js,
     date_debut_js, date_fin_js, fenetre_width=fenetre_js,
     exception_fenetre_width=exceptions_js,
+    list_ajout=list_ajout_js,
     liste_immunise_debut_annee=immunite_js,
     nb_we_immunite_debut=nb_we_immunite_js,
 )
